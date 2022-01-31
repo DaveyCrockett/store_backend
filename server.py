@@ -3,8 +3,11 @@ from flask import Flask, request, abort
 from mock_data import catalog
 import json
 from config import db
+from flask_cors import CORS
+from bson import ObjectId
 
 app = Flask(__name__)
+CORS(app)  # DANGER!! Anyone can connect to this server
 me = {
     "name": "David",
     "last": "Paredes",
@@ -15,8 +18,8 @@ me = {
         "street": "Walker",
         "number": 2345,
         "city": "Ranger"
-        }
     }
+}
 
 
 @app.route("/")
@@ -40,10 +43,12 @@ def about_me():
 
 @app.route("/api/catalog")
 def get_catalog():
-    # TODO read the catalog from a database
-    test = db.products.find({})
-    print(test)
-    return json.dumps(catalog)
+    cursor = db.products.find({})
+    results = []
+    for product in cursor:
+        product["_id"] = str(product["_id"])
+        results.append(product)
+    return json.dumps(results)
 
 
 @app.route("/api/catalog", methods=["post"])
@@ -61,18 +66,20 @@ def save_product():
         return abort(400, "The price must be greater than 0.")
 
     db.products.insert_one(product)
-    print("----------Saved-------------")
-    print(product)
+    product["_id"] = str(product["_id"])
     return json.dumps(product)
 
 
 @app.route("/api/cheapest")
 def get_cheapest():
     # find the cheapest product on the catalog list
-    cheapest = catalog[0]
-    for product in catalog:
+    cursor = db.products.find({})
+    cheapest = cursor[0]
+    for product in cursor:
         if product["price"] < cheapest["price"]:
             cheapest = product
+
+    cheapest["_id"] = str(cheapest["_id"])
     # return json
     return json.dumps(cheapest)
 
@@ -80,21 +87,25 @@ def get_cheapest():
 @app.route("/api/product/<id>")
 def get_product(id):
     #  find the product whose _id is equal to id
-    for product in catalog:
-        if product["_id"] == id:
-            return json.dumps(product)
+    if (not ObjectId.is_valid(id)):
+        return abort(400, "Id is not a valid ObjectID")
 
-    return "NOT FOUND"
+    result = db.products.find_one({"_id": ObjectId(id)})
+    if not result:
+        return abort(404)
+    result["_id"] = str(result["_id"])
+    return json.dumps(result)
 
 
 @app.route("/api/catalog/<category>")
 def get_by_category(category):
-    category_list = []
-    category = category.lower()
-    for product in catalog:
-        if product["category"].lower() == category:
-            category_list.append(product)
-    return json.dumps(category_list)
+    result = []
+    cursor = db.products.find({"category": category})
+    for prod in cursor:
+        prod["_id"] = str(prod["_id"])
+        result.append(prod)
+
+    return json.dumps(result)
 
 
 @app.route("/api/categories")
@@ -130,6 +141,63 @@ def highest_invested():
             highest = product
     # return json
     return json.dumps(highest)
+
+
+####################################################
+##############Coupon Codes endpoints################
+####################################################
+
+# GET
+
+
+@app.route("/api/couponCodes")
+def get_couponCodes():
+    cursor = db.couponCodes.find({})
+    result = []
+
+    for coupon in cursor:
+        coupon["_id"] = str(coupon["_id"])
+        result.append(coupon)
+
+    return json.dumps(result)
+
+
+# Post /api/couponCodes
+# 1 - create the end point
+# 2 - get the json from the reqs
+#   - validate (code, discount)
+# 3 - save the couponCode to db.couponCodes
+# 4 - return the saved object as json
+# 5 - test it
+
+
+@app.route("/api/couponCodes", methods=["POST"])
+def save_coupon():
+    couponCode = request.get_json()
+
+    if not "code" in couponCode:
+        return abort(400, "Code is required")
+
+    if not "discount" in couponCode:
+        return abort(400, "Discount is required")
+
+    db.couponCodes.insert_one(couponCode)
+
+    couponCode["_id"] = str(couponCode["_id"])
+    return json.dumps(couponCode)
+
+
+# retrieve specific couponCodes by its code
+@app.route("/api/couponCodes/<code>")
+def valid_code(code):
+    coupon = db.couponCodes.find_one({"code": code})
+    if not coupon:
+        return abort(404)
+
+    coupon["_id"] = str(coupon["_id"])
+
+    return json.dumps(coupon)
+
 
 # start the server
 
